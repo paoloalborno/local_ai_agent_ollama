@@ -1,4 +1,4 @@
-# 🤖 Local AI Agent with MCP Architecture - Gaming Reviews Analysis System
+# 🤖 Local AI Agent with Ollama and MCP Server/Client Architecture - Reviews Analysis System
 
 A **complete local artificial intelligence solution** that implements the **Model Context Protocol (MCP)** for advanced analysis of gaming product reviews, using a cutting-edge technology ecosystem.
 
