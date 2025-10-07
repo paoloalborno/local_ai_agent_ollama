@@ -119,6 +119,7 @@ python mcp_client.py
 
 The system provides five main commands for different interaction patterns:
 
+<<<<<<< HEAD
 #### 1. `test` - Verify MCP Connection
 
 **Usage:**
@@ -450,3 +451,10 @@ common complaints, and feature requests across product categories.
 MIT License - See LICENSE file for details.
 
 **Technologies**: Python AsyncIO • LangChain Framework • ChromaDB Vector Store • Ollama LLM Runtime • MCP Protocol • RAG Architecture • Semantic Search • AI Agent Orchestration • Real-time Processing
+=======
+- `app.py`: User interface and main Q&A logic
+- `vector.py`: Vector database and embeddings management
+- `reviews.csv`: Product reviews dataset
+- `requirements.txt`: Python project dependencies
+- `chrome_langchain_db/`: ChromaDB vector database directory
+>>>>>>> 313475441c244a09f7bf9f34e38785fbf30e443c
