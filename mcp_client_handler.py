@@ -3,6 +3,7 @@ import json
 class SimpleClientHandler:
 
     def __init__(self, client):
+        self.last_keywords = None
         self.client = client
         self.command_map = {
             "agent": self.handle_agent,
@@ -56,17 +57,16 @@ class SimpleClientHandler:
         if result and "content" in result:
             keywords = json.loads(result["content"][0]["text"])
             self.last_keywords = keywords
-            print(f"Keywords: {keywords}")
+            print(f"Keywords: {",".join(keywords)}")
         else:
             print("No keywords found")
 
     async def handle_process(self, parts):
-        keywords = self.last_keywords
+        keywords = self.last_keywords # this is an array of keywords
         k = 5
         if len(parts) > 1:
-            keywords = parts[0].split(",")
-            args = parts[1].split()
-            k = int(args[1]) if len(args) > 1 else 5
+            keywords = [kw.strip() for kw in parts[1].split(",")]
+            k = int(parts[2]) if len(parts) > 2 else 5
 
         print(f"\nRetrieving {k} reviews given the following keywords: {keywords}")
         result = await self.client.call_tool("retrieve_useful_reviews", {"keywords": keywords, "k": k})
@@ -76,6 +76,6 @@ class SimpleClientHandler:
             statistics = await self.client.call_tool("get_reviews_statistics", {"reviews": reviews})
             print(f"\nFound {len(reviews)} reviews:")
             json_result = {"reviews": reviews, "summary": summary, "statistics": statistics}
-            print(json.dumps(json_result, indent=2))
+            print(json.dumps(json_result, indent=2, ensure_ascii=False))
         else:
             print("No reviews found")

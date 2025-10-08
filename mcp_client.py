@@ -2,9 +2,7 @@ import asyncio
 import json
 import sys
 import traceback
-
 from mcp_client_handler import SimpleClientHandler
-
 
 class SimpleMCPClient:
 
@@ -90,12 +88,11 @@ class SimpleMCPClient:
             response_line = await asyncio.wait_for( self.process.stdout.readline(), timeout=timeout)
             if response_line:
                 response_text = response_line.decode().strip()
-                if response_text:
-                    try:
-                        return json.loads(response_text)
-                    except json.JSONDecodeError as e:
-                        print(f"Invalid JSON response")
-                        return None
+                try:
+                    response = json.loads(response_text)
+                    return response
+                except Exception as e:
+                    print(f"Error parsing JSON response: {e}")
             else:
                 print("Empty response from MCP server")
         except asyncio.TimeoutError:
@@ -135,12 +132,12 @@ async def interactive_client():
         print("\n" + "=" * 60)
         print("Commands:")
         print("=" * 60)
-        print("1. test                      - Test MPC connection")
-        print("2. list                      - List MCP server tools")
-        print("3. agent <query>             - Processes user query using the agent (if available)")
-        print("4. extract <query>           - Extract keywords")
-        print("5. process <keywords> <k>    - Process k reviews (retrieve, summarize and compute statistics) given a list of comma-separated keywords")
-        print("6. quit                      - Quit")
+        print("1. test                          - Test MPC connection")
+        print("2. list                          - List MCP server tools")
+        print("3. agent - <query>               - Processes user query using the agent (if available)")
+        print("4. extract - <query>             - Extract keywords")
+        print("5. process - <keywords> - <k>    - Process k reviews (retrieve, summarize and compute statistics) given a list of comma-separated keywords")
+        print("6. quit                          - Quit")
         print("=" * 60)
         print("=" * 60)
 
@@ -156,7 +153,7 @@ async def interactive_client():
             if user_input == "quit":
                 break
 
-            parts = user_input.split(" ", 1)
+            parts = [p.strip() for p in user_input.split("-")]
             command = parts[0]
 
             try:

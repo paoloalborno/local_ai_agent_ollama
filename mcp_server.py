@@ -158,6 +158,8 @@ async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[types.T
         if name in tool_handlers:
             result = tool_handlers[name](arguments)
             return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False))]
+        elif name == "agent":
+            return [types.TextContent(type="text",text=agent.process_query(arguments["user_query"]))]
         else:
             return [types.TextContent(type="text", text=json.dumps({"error": f"Unknown tool: {name}"}))]
     except Exception as e:

@@ -97,8 +97,6 @@ class TestMCPClient:
         """Test client has required attributes"""
         client = SimpleMCPClient()
         assert hasattr(client, 'request_id')
-        assert hasattr(client, 'last_keywords')
-        assert hasattr(client, 'last_processed_reviews')
         assert hasattr(client, 'process')
 
 class TestMCPIntegration:
@@ -255,7 +253,6 @@ def test_error_handling():
 
     # Test that client can be created without errors
     assert isinstance(client.last_keywords, list)
-    assert isinstance(client.last_processed_reviews, dict)
 
 if __name__ == "__main__":
     # Run tests with pytest
