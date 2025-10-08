@@ -27,7 +27,7 @@ class DummyLLM:
         return "test"
 
 class DummyRetriever:
-    def get_relevant_documents(self, query):
+    def invoke(self, query):
         class DummyDoc:
             def __init__(self, content, rating, date, title):
                 self.page_content = content
