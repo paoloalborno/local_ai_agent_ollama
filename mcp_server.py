@@ -1,13 +1,15 @@
 import asyncio
 import json
 import sys
+import traceback
 from typing import Dict, Any, List
 import mcp.types as types
 import mcp.server.stdio
 from langchain_ollama import OllamaLLM
 from mcp.server import Server, NotificationOptions
 from mcp.server.models import InitializationOptions
-from ollama_agent import OllamaAgent
+
+from agent import Agent
 from tools import AgentTools
 from vector import ReviewsVectorStore
 
@@ -15,45 +17,58 @@ server = Server("reviews-agent")
 llm = None
 vector_store: ReviewsVectorStore = None
 retriever = None
-agent_tools: AgentTools = None
-ollama_agent: OllamaAgent = None
+tools: AgentTools = None
+agent: Agent = None
+
+tool_handlers = {
+    "extract_important_keywords": lambda args: tools.extract_important_keywords(args["user_query"]),
+    "retrieve_useful_reviews": lambda args: tools.retrieve_useful_reviews(args["keywords"], args.get("k", 5)),
+    "summarize_reviews": lambda args: tools.summarize_reviews(args["reviews"]),
+    "get_reviews_statistics": lambda args: tools.get_reviews_statistics(args["reviews"])
+}
 
 def initialize_system(model_name: str = "llama3.2:latest", k: int = 5) -> bool:
-    """Initialize all components needed for the MCP server"""
-    global llm, vector_store, retriever, agent_tools, ollama_agent
+    """Initialize all components needed for the MCP server
+        - Ollama LLM, a ReviewVectorStore, a RAG retriever, AgentTools instance and an Agent instance
+    """
+    
+    global llm, vector_store, retriever, tools, agent # they are global because they are used in the @server.list_tools and @server.call_tool decorators
 
     try:
-        # Load LLM
         print(f"Loading model: {model_name}", file=sys.stderr)
         llm = OllamaLLM(model=model_name)
 
-        # Initialize vector store
-        print("Initializing vector store...", file=sys.stderr)
+        print("Initializing vector database...", file=sys.stderr)
         vector_store = ReviewsVectorStore()
         vector_store.init_database(auto_recreate=False)
 
-        # Create retriever
+        print("Create a RAG retriever...", file=sys.stderr)
         retriever = vector_store.get_retriever(k=k)
 
-        # Initialize agent tools
-        agent_tools = AgentTools(llm, retriever)
-        ollama_agent = OllamaAgent(llm, retriever)
+        print("Initializing tools...", file=sys.stderr)
+        tools = AgentTools(llm, retriever)
+
+        print("Initializing agent...", file=sys.stderr)
+        agent = Agent(llm, retriever)
 
         print("System initialized successfully", file=sys.stderr)
         return True
 
     except Exception as e:
         print(f"Error initializing system: {e}", file=sys.stderr)
-        import traceback
         traceback.print_exc(file=sys.stderr)
         return False
 
-@server.list_tools()
-async def handle_list_tools() -> List[types.Tool]:
+# the following decorated methods are part of the MCP framework - the name of the method is dynamic (list tools and call tool are chosen by the dev)
+
+@server.list_tools() # tool provider (communicate to server the list of available tools)
+async def handle_list_tools() -> List[types.Tool]:  # here async is needed because the decorator expects an async function
+    if not tools:
+        return []
     return [
         types.Tool(
             name="agent",
-            description="Process a complete query through all steps: extract keywords, retrieve reviews, and generate comprehensive analysis",
+            description="Process a complete query through all steps: extract keywords, retrieve reviews, and generate summary and statistics",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -72,7 +87,7 @@ async def handle_list_tools() -> List[types.Tool]:
         ),
         types.Tool(
             name="extract_important_keywords",
-            description="Extract the most important keywords from a user query to search for relevant reviews.",
+            description="Extract the most important keywords from a user query. Keywords are then used to search for related reviews.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -134,93 +149,26 @@ async def handle_list_tools() -> List[types.Tool]:
         )
     ]
 
-@server.call_tool()
+@server.call_tool() # executor of a tool - When server receives a request to call a tool,
+                    # this method receives the tool name and arguments, executes the tool, and returns the result
 async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[types.TextContent]:
     try:
-        if not agent_tools:
-            return [types.TextContent(
-                type="text",
-                text=json.dumps({"error": "Agent tools not initialized"})
-            )]
-
-        # Execute the requested tool
-        if name == "extract_important_keywords":
-            user_query = arguments["user_query"]
-            result = agent_tools.extract_important_keywords(user_query)
-            return [types.TextContent(
-                type="text",
-                text=json.dumps(result, ensure_ascii=False)
-            )]
-
-        elif name == "retrieve_useful_reviews":
-            global retriever
-            keywords_list = arguments["keywords"]
-            k = arguments.get("k", 5)
-
-            if retriever:
-                retriever = vector_store.get_retriever(k=k)
-                agent_tools.retriever = retriever
-
-            result = agent_tools.retrieve_useful_reviews(keywords_list, k)
-            return [types.TextContent(
-                type="text",
-                text=json.dumps(result, ensure_ascii=False)
-            )]
-
-        elif name == "summarize_reviews":
-            reviews = arguments["reviews"]
-            result = agent_tools.summarize_reviews(reviews)
-            return [types.TextContent(
-                type="text",
-                text=str(result)
-            )]
-
-        elif name == "get_reviews_statistics":
-            reviews = arguments["reviews"]
-            result = agent_tools.get_reviews_statistics(reviews)
-            return [types.TextContent(
-                type="text",
-                text=str(result)
-            )]
-
-        elif name == "agent":
-            if not ollama_agent:
-                return [types.TextContent(
-                    type="text",
-                    text=json.dumps({"error": "Ollama agent not initialized"})
-                )]
-            print(f"Processing query: {arguments['user_query']}", file=sys.stderr)
-            result = ollama_agent.process_query(arguments["user_query"])
-            print(f"Query completed", file=sys.stderr, flush=True)
-            return [types.TextContent(
-                type="text",
-                text=result
-            )]
-
+        if not tools:
+            return [types.TextContent(type="text", text=json.dumps({"error": "Agent tools not initialized"}))]
+        if name in tool_handlers:
+            result = tool_handlers[name](arguments)
+            return [types.TextContent(type="text", text=json.dumps(result, ensure_ascii=False))]
         else:
-            return [types.TextContent(
-                type="text",
-                text=json.dumps({"error": f"Unknown tool: {name}"})
-            )]
-
+            return [types.TextContent(type="text", text=json.dumps({"error": f"Unknown tool: {name}"}))]
     except Exception as e:
-        import traceback
-        error_msg = f"Error executing {name}: {str(e)}\n{traceback.format_exc()}"
-        print(error_msg, file=sys.stderr)
-        return [types.TextContent(
-            type="text",
-            text=json.dumps({"error": str(e)})
-        )]
+        return [types.TextContent(type="text", text=json.dumps({"error": str(e)}))]
 
 
 async def main():
-    """Main entry point"""
-    # Initialize system
     if not initialize_system():
-        print("Failed to initialize system", file=sys.stderr, flush=True)
+        print("Failed to initialize the server components", file=sys.stderr, flush=True)
         return
 
-    # Start MCP server
     async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
         await server.run(
             read_stream,

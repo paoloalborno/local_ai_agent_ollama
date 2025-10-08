@@ -1,9 +1,7 @@
 import json
 import sys
-
 from tools import AgentTools
-
-class OllamaAgent:
+class Agent:
 
     def __init__(self, llm, retriever):
         self.llm = llm

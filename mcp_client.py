@@ -1,14 +1,17 @@
 import asyncio
 import json
 import sys
+import traceback
+
+from mcp_client_handler import SimpleClientHandler
+
 
 class SimpleMCPClient:
 
     def __init__(self):
-        self.process = None
-        self.request_id = 0
+        self.process = None # this internal field is used to store the subprocess, this is needed to start/stop the server
+        self.request_id = 0 # request id is needed to identify the response to a request
         self.last_keywords = []
-        self.last_processed_reviews = {}
 
     async def start_server(self):
         print("Server is starting...")
@@ -20,10 +23,11 @@ class SimpleMCPClient:
         )
 
         print("Waiting for server initialization...")
+            # this part is needed to waits for any initial output from the server, which may include error messages or status updates
         try:
             stderr_output = await asyncio.wait_for(
                 self.process.stderr.read(1024),
-                timeout=5.0
+                timeout=10.0
             )
             stderr_text = stderr_output.decode().strip()
             if stderr_text:
@@ -33,7 +37,18 @@ class SimpleMCPClient:
         await asyncio.sleep(1)
 
         print("Trying to connect to MCP server...")
-        init_response = await self._send_request("initialize", "initialize",{
+        """ 
+            Start of JSON-RPC communication - Remote Procedure Calls (RPCs)
+            This part sends an "initialize" request to the server, which is a standard part of the JSON-RPC protocol for language servers
+            it includes information about the client, such as its name and version
+            the server is expected to respond with its capabilities and other initialization details
+            if the initialization is successful, a notification is sent to the server indicating that the client is ready
+            if the initialization fails, an error message is printed and the function returns False 
+        """
+
+        init_response = await self._send_request(
+            "initialize",
+            "initialize-server",{
             "protocolVersion": "202s4-11-05",
             "capabilities": {},
             "clientInfo": {
@@ -43,11 +58,11 @@ class SimpleMCPClient:
         })
 
         if init_response:
-            print("init done")
-            await self._send_notification("notifications/initialized")
+            print("Server running...")
+            await self._send_notification("notifications/initialized") # notifies the server that the client is ready to start communicating. It does not wait for a response.
             return True
         else:
-            print("init failed")
+            print("Server not responding - exiting...")
             return False
 
     async def _send_notification(self, method, params=None):
@@ -61,25 +76,18 @@ class SimpleMCPClient:
 
     async def _send_request(self, method, method_name, params=None, timeout=10.0):
         self.request_id += 1
-        request = {
-            "jsonrpc": "2.0",
-            "id": self.request_id,
-            "method": method,
-        }
+        request = { "jsonrpc": "2.0", "id": self.request_id, "method": method}
         if params:
             request["params"] = params
 
         request_str = json.dumps(request) + "\n"
 
         print(f"Sending: {method + " " + method_name}")
-        self.process.stdin.write(request_str.encode())
-        await self.process.stdin.drain()
+        self.process.stdin.write(request_str.encode()) # here is the actual request sent to the server (it is done via stdin - standard input of the process running in self.process
+        await self.process.stdin.drain() # ensures that the request is sent to the server, it cleans the write buffer
 
         try:
-            response_line = await asyncio.wait_for(
-                self.process.stdout.readline(),
-                timeout=timeout
-            )
+            response_line = await asyncio.wait_for( self.process.stdout.readline(), timeout=timeout)
             if response_line:
                 response_text = response_line.decode().strip()
                 if response_text:
@@ -94,7 +102,6 @@ class SimpleMCPClient:
             print("Waiting for response timed out")
             if self.process.returncode is not None:
                 print(f"Server shut down - code: {self.process.returncode}")
-
         return None
 
     async def list_tools(self):
@@ -105,11 +112,7 @@ class SimpleMCPClient:
 
     async def call_tool(self, name, arguments):
         timeout = 60.0 if name == "agent" else 10.0
-
-        response = await self._send_request("tools/call", name,{
-            "name": name,
-            "arguments": arguments
-        }, timeout)
+        response = await self._send_request("tools/call", name,{ "name": name, "arguments": arguments }, timeout)
         if response and "result" in response:
             return response["result"]
         return None
@@ -120,14 +123,13 @@ class SimpleMCPClient:
             await self.process.wait()
 
 
+
 async def interactive_client():
     client = SimpleMCPClient()
+    handler = SimpleClientHandler(client)
     try:
-        print("Starting MCP...\n")
         success = await client.start_server()
-
         if not success:
-            print("\n Failed to start MCP server.")
             return
 
         print("\n" + "=" * 60)
@@ -158,94 +160,17 @@ async def interactive_client():
             command = parts[0]
 
             try:
-                if command == "agent":
-                    user_query = parts[1]
-                    print(f"\nProcessing user_query: '{user_query}'")
-                    result = await client.call_tool(
-                        "agent",
-                        {"user_query": user_query}
-                    )
-                    if result:
-                        if "content" in result and result["content"]:
-                            json_data = json.loads(result["content"][0]["text"])
-                            print(json.dumps(json_data, indent=2, ensure_ascii=False))
-                        else:
-                            print(result)
-                    else:
-                        print("Agent not working")
-
-                elif command == "test":
-                    tools = await client.list_tools()
-                    if tools:
-                        print(f"Found {len(tools)} tools")
-                    else:
-                        print("Server not ready yet")
-
-                elif command == "list":
-                    print("\n Loading tools list:")
-                    tools = await client.list_tools()
-                    if tools:
-                        print(f"Found {len(tools)} tools")
-                        for tool in tools:
-                            print(f"\n  • {tool['name']}")
-                            print(f"    {tool['description']}")
-                    else:
-                        print("No tools available")
-
-                elif command == "extract" and len(parts) > 1:
-                    user_query = parts[1]
-                    print(f"\nExtracting important keywords from: '{user_query}'")
-                    result = await client.call_tool(
-                        "extract_important_keywords",
-                        {"user_query": user_query}
-                    )
-                    if result and "content" in result:
-                        keywords = json.loads(result["content"][0]["text"])
-                        client.last_keywords = keywords
-                        print(f"Keywords: {keywords}")
-                    else:
-                        print("No keywords found")
-
-                elif command == "process":
-                    keywords = client.last_keywords
-                    k = 5
-                    if len(parts) > 1:
-                        keywords = parts[0].split(",")
-                        args = parts[1].split()
-                        k = int(args[1]) if len(args) > 1 else 5
-
-                    print(f"\nRetrieving {k} reviews given the following keywords: {keywords}")
-                    result = await client.call_tool(
-                        "retrieve_useful_reviews",
-                        {"keywords": keywords, "k": k}
-                    )
-                    if result and "content" in result:
-                        reviews = json.loads(result["content"][0]["text"])
-                        summary = await client.call_tool(
-                            "summarize_reviews",
-                            {"reviews": reviews}
-                        )
-                        statistics = await client.call_tool(
-                            "get_reviews_statistics",
-                            {"reviews": reviews}
-                        )
-                        print(f"\nFound {len(reviews)} reviews:")
-                        json_result = {"reviews": reviews, "summary": summary, "statistics": statistics}
-                        print(json.dumps(json_result, indent=2))
-
-                    else:
-                        print("No reviews found")
-
-                else:
+                if command not in handler.command_map:
                     print("Command not recognized.")
-
+                    continue
+                else:
+                    await handler.command_map[command](parts)
             except Exception as e:
                 print(f"\nError: {e}")
-                import traceback
                 traceback.print_exc()
 
     except KeyboardInterrupt:
-        print("\n\n Bye ")
+        print("\n Bye ")
     finally:
         print("\n Shutting down server...")
         await client.stop_server()
